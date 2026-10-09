@@ -31,8 +31,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const { data } = await getSupabaseClient().auth.getSession();
-    applySession(data.session);
+    try {
+      const { data } = await getSupabaseClient().auth.getSession();
+      applySession(data.session);
+    } catch {
+      // Match the initial-load failure path: a failed session read must not
+      // leave the provider in an indeterminate state or reject to callers.
+      applySession(null);
+    }
   }, [applySession]);
 
   useEffect(() => {
