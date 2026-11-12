@@ -1,0 +1,30 @@
+name: BENTROPIE Actions Baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bentropie-actions-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inventory:
+    name: Read-only repository inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Record verifiable revision
+        shell: bash
+        run: |
+          echo "repository=$GITHUB_REPOSITORY"
+          echo "ref=$GITHUB_REF"
+          echo "sha=$GITHUB_SHA"
+          echo "runner=$RUNNER_OS"
+          git rev-parse HEAD
+          git status --porcelain
+          find .github/workflows -maxdepth 1 -type f -print 2>/dev/null | sort || true
