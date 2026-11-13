@@ -85,14 +85,46 @@ function url(path: string): string {
 }
 
 /**
- * Reads a response body as JSON, or `undefined` if it is not JSON.
+ * Maximum JSON response size: 1 MiB of wire bytes, not UTF-16 characters.
+ * Enforced while reading so an untrusted server cannot force an unbounded
+ * `response.text()` allocation before we inspect the payload.
+ */
+const MAX_RESPONSE_BYTES = 1024 * 1024;
+
+/**
+ * Reads a bounded response body as JSON, or `undefined` if it is not JSON.
  *
  * A 502 from a proxy is HTML, and `response.json()` on it throws a `SyntaxError`
  * that says nothing about the actual problem. Returning `undefined` lets the
  * caller report the status, which is the informative part.
+ *
+ * Decode incrementally: a UTF-8 character may span multiple stream chunks.
  */
 async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+  if (response.body === null) return undefined;
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let bytesRead = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      if (bytesRead > MAX_RESPONSE_BYTES) {
+        void reader.cancel().catch(() => undefined);
+        throw new ApiError(response.status, undefined, `The server returned a response larger than ${MAX_RESPONSE_BYTES} bytes.`);
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+  } finally {
+    reader.releaseLock();
+  }
+
+  const text = chunks.join('');
   if (text.length === 0) return undefined;
   try {
     return JSON.parse(text) as unknown;

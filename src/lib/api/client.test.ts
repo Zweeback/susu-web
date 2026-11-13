@@ -47,6 +47,40 @@ afterEach(() => {
 });
 
 describe('apiRequest', () => {
+  it('rejects a response exceeding 1 MiB with a clear ApiError', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(1024 * 1024));
+        controller.enqueue(new Uint8Array([123]));
+      },
+      cancel,
+    });
+    fetchMock.mockResolvedValue(new Response(stream, { status: 200 }));
+    await expect(apiRequest('groups')).rejects.toMatchObject({
+      name: 'ApiError', status: 200, message: expect.stringContaining('1048576 bytes'),
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a valid JSON body exactly at the 1 MiB limit', async () => {
+    const json = '{"data":null}';
+    fetchMock.mockResolvedValue(new Response(json + ' '.repeat(1024 * 1024 - json.length), { status: 200 }));
+    await expect(apiRequest('groups')).resolves.toBeNull();
+  });
+
+  it('decodes a multi-byte UTF-8 character across stream chunks', async () => {
+    const bytes = new TextEncoder().encode('{"data":"€"}');
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.slice(0, 10));
+        controller.enqueue(bytes.slice(10));
+        controller.close();
+      },
+    });
+    fetchMock.mockResolvedValue(new Response(stream, { status: 200 }));
+    await expect(apiRequest('groups')).resolves.toBe('€');
+  });
   it('unwraps the data envelope', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { data: { code: 'abc' } }));
 
